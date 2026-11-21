@@ -1,0 +1,21 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'org.lb2002.files'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'org.lb2002.files'
+        minSdk 26
+        targetSdk 32
+        versionCode 6
+        versionName '0.1.0-alpha.1'
+    }
+    sourceSets.main {
+        manifest.srcFile 'AndroidManifest.xml'
+        java.srcDirs = ['src']
+        res.srcDirs = ['res']
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
