@@ -82,7 +82,28 @@ final class FileIO {
         return result;
     }
 
-    static List<Entry> list(String directory) throws IOException {
+    static String[] protectedRoots(Context context, String directory) throws IOException {
+        Path requested = Paths.get(directory).toAbsolutePath().normalize();
+        Path internal = Environment.getExternalStorageDirectory().toPath().toAbsolutePath().normalize();
+        for (Entry entry : roots(context)) {
+            Path root = Paths.get(entry.path).toAbsolutePath().normalize();
+            for (String name : new String[]{"data", "obb"}) {
+                Path limited = root.resolve("Android").resolve(name);
+                if (!requested.startsWith(limited)) continue;
+                String rawRoot = root.equals(internal)
+                    ? "/data/media/" + org.lb2002.shared.RootAccess.userId()
+                    : "/mnt/media_rw/" + root.getFileName();
+                return new String[]{limited.toString(), rawRoot + "/Android/" + name};
+            }
+        }
+        return null;
+    }
+
+    static List<Entry> list(Context context, String directory) throws IOException {
+        if (protectedRoots(context, directory) != null) {
+            List<Entry> result = RootFiles.list(context, directory);
+            sort(result); return result;
+        }
         List<Entry> result = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(Paths.get(directory))) {
             for (Path path : stream) {
@@ -95,10 +116,13 @@ final class FileIO {
                 }
             }
         }
+        sort(result);
+        return result;
+    }
+    private static void sort(List<Entry> result) {
         Collator collator = Collator.getInstance();
         result.sort((a, b) -> a.directory != b.directory
             ? (a.directory ? -1 : 1) : collator.compare(a.name, b.name));
-        return result;
     }
 
     static String mime(String path) {
@@ -123,7 +147,7 @@ final class FileIO {
             }
         } catch (IOException | SecurityException inaccessible) { /* Try the Root storage service below. */ }
         String volumes = org.lb2002.shared.RootAccess.run(context, "sm list-volumes all");
-        for (String line : volumes.split("\\r?\\n")) {
+        for (String line : volumes.split("\r?\n")) {
             String[] fields = line.trim().split("\\s+");
             if (fields.length >= 3 && fields[0].matches("public:[0-9]+,[0-9]+")
                     && fields[1].equals("mounted") && fields[2].equalsIgnoreCase(id)) return fields[0];
@@ -185,6 +209,7 @@ final class FileIO {
 
     static File allowedFile(Context context, String path) throws IOException {
         if (path == null) throw new IOException("缺少文件路径");
+        if (protectedRoots(context, path) != null) return Paths.get(path).toAbsolutePath().normalize().toFile();
         Path file = Paths.get(path).toRealPath();
         for (Entry root : roots(context)) {
             try {
@@ -193,6 +218,11 @@ final class FileIO {
             } catch (IOException removed) { /* A different volume may have been unplugged. */ }
         }
         throw new IOException("文件不在允许访问的存储空间中");
+    }
+
+    static android.os.ParcelFileDescriptor openRead(Context context, String path) throws IOException {
+        if (protectedRoots(context, path) != null) return RootFiles.open(context, path);
+        return android.os.ParcelFileDescriptor.open(allowedFile(context, path), android.os.ParcelFileDescriptor.MODE_READ_ONLY);
     }
 
     static String size(long bytes) {

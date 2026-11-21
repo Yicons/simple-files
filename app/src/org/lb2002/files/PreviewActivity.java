@@ -100,7 +100,7 @@ public final class PreviewActivity extends Activity {
             try {
                 file = FileIO.allowedFile(this, getIntent().getStringExtra("path"));
                 if (imageFile(file.getPath())) {
-                    pictures.addAll(FileIO.list(file.getParent()));
+                    pictures.addAll(FileIO.list(this, file.getParent()));
                     pictures.removeIf(e -> e.directory || !imageFile(e.path));
                     for (int i = 0; i < pictures.size(); i++)
                         if (pictures.get(i).path.equals(file.getPath())) pictureIndex = i;
@@ -115,7 +115,7 @@ public final class PreviewActivity extends Activity {
                         loadPicture();
                     });
                 } else if ("pdf".equals(extension(file.getName()))) {
-                    pdfFile = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+                    pdfFile = FileIO.openRead(this, file.getPath());
                     pdf = new PdfRenderer(pdfFile);
                     pageCount = pdf.getPageCount();
                     if (pageCount == 0) throw new Exception("PDF 没有可显示的页面");
@@ -129,7 +129,7 @@ public final class PreviewActivity extends Activity {
                 } else {
                     String ext = extension(file.getName());
                     String body = Arrays.asList("docx", "xlsx", "pptx").contains(ext)
-                        ? office(file, ext) : readText(file);
+                        ? readOffice(file, ext) : readText(file);
                     runOnUiThread(() -> showText(body,
                         Arrays.asList("docx", "xlsx", "pptx").contains(ext) ? "文档文本预览" : "文本预览"));
                 }
@@ -189,13 +189,18 @@ public final class PreviewActivity extends Activity {
             try {
                 BitmapFactory.Options bounds = new BitmapFactory.Options();
                 bounds.inJustDecodeBounds = true;
-                BitmapFactory.decodeFile(path, bounds);
+                try (ParcelFileDescriptor descriptor = FileIO.openRead(this, path)) {
+                    BitmapFactory.decodeFileDescriptor(descriptor.getFileDescriptor(), null, bounds);
+                }
                 if (bounds.outWidth <= 0) throw new Exception("图片格式不受当前系统支持");
                 BitmapFactory.Options options = new BitmapFactory.Options();
                 options.inSampleSize = 1;
                 while (bounds.outWidth / options.inSampleSize > 2560 ||
                        bounds.outHeight / options.inSampleSize > 1440) options.inSampleSize *= 2;
-                Bitmap bitmap = BitmapFactory.decodeFile(path, options);
+                Bitmap bitmap;
+                try (ParcelFileDescriptor descriptor = FileIO.openRead(this, path)) {
+                    bitmap = BitmapFactory.decodeFileDescriptor(descriptor.getFileDescriptor(), null, options);
+                }
                 if (bitmap == null) throw new Exception("图片无法解码");
                 display(bitmap, id, (number + 1) + " / " + Math.max(1, pictures.size())
                     + " · " + new File(path).getName() + " · " + bounds.outWidth + " × " + bounds.outHeight);
@@ -241,8 +246,8 @@ public final class PreviewActivity extends Activity {
         scroll.setFocusable(true); scroll.requestFocus();
         status.setText(type);
     }
-    private static String readText(File file) throws Exception {
-        try (InputStream in = new FileInputStream(file)) {
+    private String readText(File file) throws Exception {
+        try (InputStream in = new ParcelFileDescriptor.AutoCloseInputStream(FileIO.openRead(this, file.getPath()))) {
             byte[] bytes = limited(in);
             int offset = bytes.length >= 3 && bytes[0] == (byte) 0xef
                 && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf ? 3 : 0;
@@ -254,6 +259,23 @@ public final class PreviewActivity extends Activity {
                     .decode(ByteBuffer.wrap(bytes, offset, bytes.length - offset)).toString();
             } catch (CharacterCodingException e) { return new String(bytes, Charset.forName("GB18030")); }
         }
+    }
+    private String readOffice(File file, String extension) throws Exception {
+        if (FileIO.protectedRoots(this, file.getPath()) == null) return office(file, extension);
+        File copy = File.createTempFile("document-", "." + extension, getCacheDir());
+        try {
+            try (InputStream in = new ParcelFileDescriptor.AutoCloseInputStream(FileIO.openRead(this, file.getPath()));
+                 java.io.OutputStream out = new java.io.FileOutputStream(copy)) {
+                byte[] buffer = new byte[65536];
+                long total = 0; int count;
+                while ((count = in.read(buffer)) != -1) {
+                    total += count;
+                    if (total > 32L * 1024 * 1024) throw new Exception("受限目录中的 Office 文档超过 32 MB");
+                    out.write(buffer, 0, count);
+                }
+            }
+            return office(copy, extension);
+        } finally { copy.delete(); }
     }
     private static byte[] limited(InputStream in) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();

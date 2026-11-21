@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
             permissionButton.setVisibility(View.GONE);
         addButton(actions, "权限", () -> org.lb2002.shared.RootAccess.show(this,
             "android.permission.MOUNT_UNMOUNT_FILESYSTEMS",
-            "浏览和预览文件只需要存储权限。安全弹出 U 盘需要系统权限或 Root；授权不改变普通文件访问方式。"));
+            "普通目录使用存储权限。Android/data、Android/obb 使用 Root 只读访问；安全弹出 U 盘需要系统权限或 Root。"));
         root.addView(actions);
         status = text("读取存储空间…", 15, MUTED);
         status.setPadding(0, dp(15), 0, dp(8));
@@ -221,6 +221,7 @@ public final class MainActivity extends Activity {
     }
     @Override public void onResume() {
         super.onResume();
+        if (busy) return; // A Root authorization dialog must not cancel the pending navigation.
         if (current == null) loadHome(); else loadDirectory(current);
     }
     @Override public void onSaveInstanceState(Bundle out) {
@@ -383,7 +384,7 @@ public final class MainActivity extends Activity {
         status.setText("正在读取…");
         worker.execute(() -> {
             try {
-                List<FileIO.Entry> result = path == null ? FileIO.roots(this) : FileIO.list(path);
+                List<FileIO.Entry> result = path == null ? FileIO.roots(this) : FileIO.list(this, path);
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || generation != request) return;
                     current = path;
@@ -406,7 +407,9 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed() || generation != request) return;
                     busy = false;
-                    status.setText("无法读取 · " + e.getMessage() + "。请检查 U 盘连接和存储权限");
+                    boolean restricted = path != null && path.matches(".*/Android/(data|obb)(/.*)?");
+                    status.setText(restricted ? "无法读取受保护目录：" + e.getMessage()
+                        : "无法读取此目录：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
                 });
             }
         });

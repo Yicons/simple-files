@@ -20,20 +20,25 @@ public final class FilesProvider extends ContentProvider {
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         if (!"r".equals(mode)) throw new FileNotFoundException("仅支持读取");
         try {
-            File file = FileIO.allowedFile(getContext(), uri.getQueryParameter("path"));
-            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            return FileIO.openRead(getContext(), uri.getQueryParameter("path"));
         } catch (IOException e) { throw new FileNotFoundException(e.getMessage()); }
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sort) {
         try {
             File file = FileIO.allowedFile(getContext(), uri.getQueryParameter("path"));
+            long size = file.length();
+            if (FileIO.protectedRoots(getContext(), file.getPath()) != null) {
+                try (ParcelFileDescriptor descriptor = FileIO.openRead(getContext(), file.getPath())) {
+                    size = descriptor.getStatSize();
+                }
+            }
             String[] columns = projection == null
                 ? new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE} : projection;
             MatrixCursor cursor = new MatrixCursor(columns);
             Object[] row = new Object[columns.length];
             for (int i = 0; i < columns.length; i++) {
                 if (OpenableColumns.DISPLAY_NAME.equals(columns[i])) row[i] = file.getName();
-                if (OpenableColumns.SIZE.equals(columns[i])) row[i] = file.length();
+                if (OpenableColumns.SIZE.equals(columns[i])) row[i] = size;
             }
             cursor.addRow(row);
             return cursor;
