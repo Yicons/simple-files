@@ -2,6 +2,8 @@ plugins { id 'com.android.application' }
 android {
     namespace 'org.lb2002.files'
     compileSdk 35
+    // Firmware/sideload distribution; Play target-API migration is separate.
+    lint { disable 'ExpiredTargetSdkVersion' }
     defaultConfig {
         applicationId 'org.lb2002.files'
         minSdk 26
